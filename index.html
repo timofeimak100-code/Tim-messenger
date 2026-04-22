@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>SecureMessenger — E2E Encryption</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tweetnacl-util@0.15.1/nacl-util.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+        }
+        .container {
+            max-width: 450px;
+            width: 100%;
+            background: rgba(30, 41, 59, 0.95);
+            border-radius: 32px;
+            padding: 32px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+        }
+        .chat-container {
+            max-width: 1200px;
+            width: 100%;
+            background: rgba(30, 41, 59, 0.95);
+            border-radius: 32px;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+            height: 90vh;
+            display: flex;
+            flex-direction: column;
+        }
+        h1, h2 { color: #f1f5f9; margin-bottom: 24px; text-align: center; }
+        input, button {
+            padding: 12px 16px;
+            border-radius: 12px;
+            border: none;
+            font-size: 1rem;
+            width: 100%;
+            margin-bottom: 12px;
+        }
+        input { background: #1e293b; border: 1px solid #334155; color: #f1f5f9; outline: none; }
+        input:focus { border-color: #3b82f6; }
+        button { background: #3b82f6; color: white; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        button:hover { background: #2563eb; transform: translateY(-1px); }
+        .error { color: #f87171; font-size: 0.875rem; margin-top: 8px; text-align: center; }
+        .success { color: #4ade80; text-align: center; }
+        .flex-row { display: flex; gap: 12px; justify-content: center; margin-bottom: 24px; }
+        .flex-row button { width: auto; margin-bottom: 0; }
+        .chat-layout { display: flex; height: 100%; }
+        .sidebar {
+            width: 280px;
+            background: #0f172a;
+            border-right: 1px solid #334155;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+        .main-chat { flex: 1; display: flex; flex-direction: column; }
+        .header {
+            padding: 16px;
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .user-info { color: #f1f5f9; font-size: 14px; }
+        .logout-btn { background: #ef4444; padding: 6px 12px; font-size: 12px; width: auto; margin: 0; }
+        .search-box { padding: 12px; border-bottom: 1px solid #334155; }
+        .search-box input { margin-bottom: 0; }
+        .dialogs-list { flex: 1; overflow-y: auto; }
+        .dialog-item {
+            padding: 12px;
+            border-bottom: 1px solid #334155;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .dialog-item:hover { background: #334155; }
+        .dialog-item.active { background: #3b82f6; }
+        .dialog-name { color: #f1f5f9; font-weight: 500; }
+        .dialog-last { font-size: 12px; color: #94a3b8; }
+        .messages-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .message {
+            padding: 8px 12px;
+            border-radius: 12px;
+            max-width: 70%;
+        }
+        .message-mine { background: #3b82f6; align-self: flex-end; }
+        .message-other { background: #334155; align-self: flex-start; }
+        .message-username { font-size: 10px; color: #94a3b8; margin-bottom: 4px; }
+        .message-text { color: #f1f5f9; word-wrap: break-word; }
+        .message-time { font-size: 10px; color: #64748b; margin-top: 4px; text-align: right; }
+        .input-area {
+            padding: 16px;
+            background: #1e293b;
+            border-top: 1px solid #334155;
+            display: flex;
+            gap: 8px;
+        }
+        .input-area input { margin-bottom: 0; flex: 1; }
+        .input-area button { width: auto; padding: 12px 24px; margin-bottom: 0; }
+        .section-title { padding: 12px; color: #94a3b8; font-size: 12px; font-weight: 600; border-bottom: 1px solid #334155; }
+        .no-data { padding: 16px; color: #64748b; text-align: center; font-size: 12px; }
+        .encryption-badge {
+            background: #10b981;
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 20px;
+            margin-left: 8px;
+        }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div id="authScreen" class="container">
+        <h1>🔐 SecureMessenger <span style="font-size: 12px;">E2E Encrypted</span></h1>
+        <div class="flex-row">
+            <button id="showLoginBtn" style="background: #3b82f6;">Вход</button>
+            <button id="showRegisterBtn" style="background: #334155;">Регистрация</button>
+        </div>
+        
+        <div id="loginForm">
+            <input type="email" id="loginEmail" placeholder="Email">
+            <input type="password" id="loginPassword" placeholder="Пароль">
+            <button id="doLoginBtn">Войти</button>
+            <div id="loginError" class="error"></div>
+        </div>
+        
+        <div id="registerForm" style="display: none;">
+            <input type="email" id="regEmail" placeholder="Email">
+            <input type="text" id="regUsername" placeholder="Имя пользователя (ник)">
+            <input type="password" id="regPassword" placeholder="Пароль (мин. 6 символов)">
+            <button id="doRegisterBtn">Зарегистрироваться</button>
+            <div id="regError" class="error"></div>
+        </div>
+    </div>
+    
+    <div id="chatScreen" class="chat-container" style="display: none;">
+        <div class="chat-layout">
+            <div class="sidebar">
+                <div class="header" style="flex-direction: column; gap: 8px;">
+                    <div class="user-info" id="userInfo"></div>
+                    <button id="logoutBtn" class="logout-btn">🚪 Выйти</button>
+                </div>
+                <div class="search-box">
+                    <input type="text" id="searchUsersInput" placeholder="🔍 Найти пользователя по @username">
+                </div>
+                <div id="searchResults" class="dialogs-list" style="max-height: 200px;"></div>
+                <div class="section-title">💬 Мои диалоги</div>
+                <div id="dialogsList" class="dialogs-list"></div>
+            </div>
+            <div class="main-chat">
+                <div class="header">
+                    <div class="user-info" id="chatWithLabel">Выберите собеседника</div>
+                </div>
+                <div id="messagesArea" class="messages-area">
+                    <div class="no-data">Выберите диалог, чтобы начать общение</div>
+                </div>
+                <div class="input-area">
+                    <input type="text" id="messageInput" placeholder="Введите сообщение..." disabled>
+                    <button id="sendBtn" disabled>📤 Отправить (E2E)</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ============================================================
+    // 🔥 ТВОИ ДАННЫЕ ИЗ SUPABASE 🔥
+    // ============================================================
+    const SUPABASE_URL = 'https://nufsoonoanfrtmrveida.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51ZnNvb25vYW5mcnRtcnZlaWRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NjA1NDAsImV4cCI6MjA5MjQzNjU0MH0.F-8VDXstONQSgmCyRAtoVdYBQTb1mIUZh7zIWYGj37A';
+    // ============================================================
+    
+    const supabase = supabaseJs.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    
+    let currentUser = null;
+    let currentChatUser = null;
+    let allUsers = [];
+    let messageInterval = null;
+    let myPrivateKey = null;
+    
+    // ============================================================
+    // 🔐 КРИПТОГРАФИЯ (TweetNaCl.js)
+    // ============================================================
+    
+    // Генерация пары ключей
+    function generateKeyPair() {
+        const keyPair = nacl.box.keyPair();
+        return {
+            publicKey: naclUtil.encodeBase64(keyPair.publicKey),
+            privateKey: naclUtil.encodeBase64(keyPair.secretKey)
+        };
+    }
+    
+    // Шифрование сообщения для получателя
+    function encryptMessage(message, recipientPublicKeyBase64) {
+        try {
+            const recipientPublicKey = naclUtil.decodeBase64(recipientPublicKeyBase64);
+            const ephemeralKeyPair = nacl.box.keyPair();
+            const nonce = nacl.randomBytes(24);
+            
+            const encrypted = nacl.box(
+                naclUtil.decodeUTF8(message),
+                nonce,
+                recipientPublicKey,
+                ephemeralKeyPair.secretKey
+            );
+            
+            return {
+                encrypted: naclUtil.encodeBase64(encrypted),
+                nonce: naclUtil.encodeBase64(nonce),
+                ephemeralPublicKey: naclUtil.encodeBase64(ephemeralKeyPair.publicKey)
+            };
+        } catch (e) {
+            console.error('Encryption error:', e);
+            return null;
+        }
+    }
+    
+    // Расшифровка сообщения
+    function decryptMessage(encryptedBase64, nonceBase64, senderPublicKeyBase64, myPrivateKeyBase64) {
+        try {
+            const encrypted = naclUtil.decodeBase64(encryptedBase64);
+            const nonce = naclUtil.decodeBase64(nonceBase64);
+            const senderPublicKey = naclUtil.decodeBase64(senderPublicKeyBase64);
+            const myPrivateKey = naclUtil.decodeBase64(myPrivateKeyBase64);
+            
+            const decrypted = nacl.box.open(encrypted, nonce, senderPublicKey, myPrivateKey);
+            if (!decrypted) return null;
+            return naclUtil.encodeUTF8(decrypted);
+        } catch (e) {
+            console.error('Decryption error:', e);
+            return null;
+        }
+    }
+    
+    // Сохранение ключей пользователя
+    async function saveUserKeys(userId, publicKey, privateKey) {
+        // Сохраняем публичный ключ в Supabase
+        const { error } = await supabase
+            .from('profiles')
+            .update({ public_key: publicKey })
+            .eq('id', userId);
+        
+        if (error) {
+            console.error('Error saving public key:', error);
+        }
+        
+        // Сохраняем приватный ключ в localStorage (зашифрованным паролем в будущем)
+        localStorage.setItem(`privateKey_${userId}`, privateKey);
+    }
+    
+    // Получение публичного ключа пользователя
+    async function getUserPublicKey(userId) {
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('public_key')
+            .eq('id', userId)
+            .single();
+        
+        if (error || !data?.public_key) {
+            console.error('No public key for user:', userId);
+            return null;
+        }
+        return data.public_key;
+    }
+    
+    // ============================================================
+    // 👤 АВТОРИЗАЦИЯ
+    // ============================================================
+    
+    async function register(email, username, password) {
+        // Генерируем ключи ДО регистрации
+        const keys = generateKeyPair();
+        
+        const { data, error } = await supabase.auth.signUp({
+            email: email,
+            password: password,
+            options: { 
+                data: { 
+                    username: username, 
+                    display_name: username,
+                    public_key: keys.publicKey
+                } 
+            }
+        });
+        
+        if (error) throw error;
+        
+        // Сохраняем приватный ключ
+        if (data.user) {
+            localStorage.setItem(`privateKey_${data.user.id}`, keys.privateKey);
+        }
+        
+        return data;
+    }
+    
+    async function login(email, password) {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        
+        // Загружаем приватный ключ из localStorage
+        if (data.user) {
+            myPrivateKey = localStorage.getItem(`privateKey_${data.user.id}`);
+            
+            // Если ключа нет — генерируем новый
+            if (!myPrivateKey) {
+                const keys = generateKeyPair();
+                myPrivateKey = keys.privateKey;
+                await saveUserKeys(data.user.id, keys.publicKey, keys.privateKey);
+            }
+        }
+        
+        return data;
+    }
+    
+    async function logout() {
+        await supabase.auth.signOut();
+        if (messageInterval) clearInterval(messageInterval);
+        currentUser = null;
+        currentChatUser = null;
+        myPrivateKey = null;
+        showAuthScreen();
+    }
+    
+    // ============================================================
+    // 💬 СООБЩЕНИЯ
+    // ============================================================
+    
+    async function sendEncryptedMessage(toUserId, message) {
+        if (!currentUser || !message.trim()) return;
+        
+        // Получаем публичный ключ получателя
+        const recipientPublicKey = await getUserPublicKey(toUserId);
+        if (!recipientPublicKey) {
+            alert('Невозможно отправить сообщение: у получателя нет публичного ключа');
+            return;
+        }
+        
+        // Шифруем сообщение
+        const encrypted = encryptMessage(message, recipientPublicKey);
+        if (!encrypted) {
+            alert('Ошибка шифрования');
+            return;
+        }
+        
+        // Сохраняем в БД
+        const { error } = await supabase
+            .from('messages')
+            .insert({
+                from_user_id: currentUser.id,
+                to_user_id: toUserId,
+                encrypted_content: encrypted.encrypted,
+                nonce: encrypted.nonce,
+                is_private: true
+            });
+        
+        if (error) {
+            console.error('Send error:', error);
+            alert('Ошибка отправки: ' + error.message);
+            return;
+        }
+        
+        // Обновляем диалог
+        await supabase
+            .from('dialogs')
+            .upsert({
+                user1_id: currentUser.id,
+                user2_id: toUserId,
+                last_message: '🔒 Зашифрованное сообщение',
+                last_message_time: new Date()
+            }, { onConflict: 'user1_id,user2_id' });
+        
+        return true;
+    }
+    
+    async function loadAndDecryptMessages(withUserId) {
+        if (!currentUser || !withUserId) return [];
+        
+        const { data, error } = await supabase
+            .from('messages')
+            .select('*')
+            .or(`and(from_user_id.eq.${currentUser.id},to_user_id.eq.${withUserId}),and(from_user_id.eq.${withUserId},to_user_id.eq.${currentUser.id})`)
+            .order('created_at', { ascending: true });
+        
+        if (error) {
+            console.error('Error loading messages:', error);
+            return [];
+        }
+        
+        // Расшифровываем сообщения
+        const decryptedMessages = [];
+        for (const msg of data) {
+            const isMine = msg.from_user_id === currentUser.id;
+            let decryptedText = '🔒 Не удалось расшифровать';
+            
+            if (isMine) {
+                // Свои сообщения — они уже были зашифрованы, но мы не храним исходный текст
+                decryptedText = '🔒 Отправлено (E2E)';
+            } else {
+                // Чужие сообщения — расшифровываем
+                const senderPublicKey = await getUserPublicKey(msg.from_user_id);
+                if (senderPublicKey && myPrivateKey) {
+                    const decrypted = decryptMessage(
+                        msg.encrypted_content,
+                        msg.nonce,
+                        senderPublicKey,
+                        myPrivateKey
+                    );
+                    if (decrypted) decryptedText = decrypted;
+                }
+            }
+            
+            decryptedMessages.push({
+                ...msg,
+                decryptedText,
+                isMine
+            });
+        }
+        
+        return decryptedMessages;
+    }
+    
+    // ============================================================
+    // 📱 UI ФУНКЦИИ
+    // ============================================================
+    
+    async function loadUsers() {
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('id, username, display_name, public_key');
+        if (error) {
+            console.error('Error loading users:', error);
+            return [];
+        }
+        allUsers = data.filter(u => u.id !== currentUser?.id) || [];
+        return allUsers;
+    }
+    
+    async function loadDialogs() {
+        if (!currentUser) return [];
+        
+        const { data, error } = await supabase
+            .from('dialogs')
+            .select('*')
+            .or(`user1_id.eq.${currentUser.id},user2_id.eq.${currentUser.id}`)
+            .order('last_message_time', { ascending: false });
+        
+        if (error) return [];
+        
+        const dialogsWithUsers = await Promise.all(data.map(async (dialog) => {
+            const otherId = dialog.user1_id === currentUser.id ? dialog.user2_id : dialog.user1_id;
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('username, display_name')
+                .eq('id', otherId)
+                .single();
+            return {
+                ...dialog,
+                otherId,
+                username: profile?.username || 'unknown'
+            };
+        }));
+        
+        return dialogsWithUsers;
+    }
+    
+    async function searchUsers(query) {
+        if (!query || query.length < 1) return [];
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('id, username, display_name')
+            .ilike('username', `%${query.replace('@', '')}%`)
+            .limit(10);
+        if (error) return [];
+        return data.filter(u => u.id !== currentUser?.id);
+    }
+    
+    function showAuthScreen() {
+        document.getElementById('authScreen').style.display = 'block';
+        document.getElementById('chatScreen').style.display = 'none';
+    }
+    
+    function showChatScreen() {
+        document.getElementById('authScreen').style.display = 'none';
+        document.getElementById('chatScreen').style.display = 'flex';
+        const username = currentUser.user_metadata?.username || 'user';
+        document.getElementById('userInfo').innerHTML = `${currentUser.email} <span style="color:#3b82f6;">@${username}</span> <span class="encryption-badge">E2E</span>`;
+        refreshDialogs();
+        refreshSearchResults();
+        if (messageInterval) clearInterval(messageInterval);
+        messageInterval = setInterval(() => {
+            if (currentChatUser) refreshMessages();
+            refreshDialogs();
+        }, 3000);
+    }
+    
+    async function refreshDialogs() {
+        const dialogs = await loadDialogs();
+        const container = document.getElementById('dialogsList');
+        if (dialogs.length === 0) {
+            container.innerHTML = '<div class="no-data">Нет диалогов.<br>Найдите пользователя через поиск</div>';
+            return;
+        }
+        container.innerHTML = dialogs.map(d => `
+            <div class="dialog-item ${currentChatUser === d.otherId ? 'active' : ''}" onclick="selectChat('${d.otherId}', '${d.username}')">
+                <div class="dialog-name">@${d.username}</div>
+                <div class="dialog-last">${d.last_message || 'Новое сообщение'}</div>
+            </div>
+        `).join('');
+    }
+    
+    async function refreshSearchResults() {
+        const searchInput = document.getElementById('searchUsersInput').value;
+        if (!searchInput) {
+            document.getElementById('searchResults').innerHTML = '';
+            return;
+        }
+        const results = await searchUsers(searchInput);
+        const container = document.getElementById('searchResults');
+        if (results.length === 0) {
+            container.innerHTML = '<div class="no-data">Пользователи не найдены</div>';
+            return;
+        }
+        container.innerHTML = results.map(u => `
+            <div class="dialog-item" onclick="selectChat('${u.id}', '${u.username}')">
+                <div class="dialog-name">@${u.username}</div>
+                <div class="dialog-last">${u.display_name || ''} ${!u.public_key ? '⚠️ нет ключа' : '🔐'}</div>
+            </div>
+        `).join('');
+    }
+    
+    async function refreshMessages() {
+        if (!currentChatUser) return;
+        const messages = await loadAndDecryptMessages(currentChatUser);
+        const container = document.getElementById('messagesArea');
+        if (messages.length === 0) {
+            container.innerHTML = '<div class="no-data">Нет сообщений. Напишите что-нибудь!</div>';
+            return;
+        }
+        container.innerHTML = messages.map(m => {
+            const username = m.isMine ? 'Вы' : `@${allUsers.find(u => u.id === m.from_user_id)?.username || 'unknown'}`;
+            return `
+                <div class="message ${m.isMine ? 'message-mine' : 'message-other'}">
+                    <div class="message-username">${username}</div>
+                    <div class="message-text">${escapeHtml(m.decryptedText)}</div>
+                    <div class="message-time">${new Date(m.created_at).toLocaleTimeString()}</div>
+                </div>
+            `;
+        }).join('');
+        container.scrollTop = container.scrollHeight;
+    }
+    
+    window.selectChat = async (userId, username) => {
+        currentChatUser = userId;
+        document.getElementById('chatWithLabel').innerHTML = `Чат с @${username} 🔐 E2E`;
+        document.getElementById('messageInput').disabled = false;
+        document.getElementById('sendBtn').disabled = false;
+        await refreshMessages();
+        refreshDialogs();
+    };
+    
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    // ============================================================
+    // 🖱️ ОБРАБОТЧИКИ
+    // ============================================================
+    
+    document.getElementById('showLoginBtn')?.addEventListener('click', () => {
+        document.getElementById('loginForm').style.display = 'block';
+        document.getElementById('registerForm').style.display = 'none';
+        document.getElementById('showLoginBtn').style.background = '#3b82f6';
+        document.getElementById('showRegisterBtn').style.background = '#334155';
+    });
+    
+    document.getElementById('showRegisterBtn')?.addEventListener('click', () => {
+        document.getElementById('loginForm').style.display = 'none';
+        document.getElementById('registerForm').style.display = 'block';
+        document.getElementById('showRegisterBtn').style.background = '#3b82f6';
+        document.getElementById('showLoginBtn').style.background = '#334155';
+    });
+    
+    document.getElementById('doLoginBtn')?.addEventListener('click', async () => {
+        const email = document.getElementById('loginEmail').value;
+        const password = document.getElementById('loginPassword').value;
+        try {
+            await login(email, password);
+            document.getElementById('loginError').innerHTML = '';
+        } catch(e) {
+            document.getElementById('loginError').innerHTML = e.message;
+        }
+    });
+    
+    document.getElementById('doRegisterBtn')?.addEventListener('click', async () => {
+        const email = document.getElementById('regEmail').value;
+        const username = document.getElementById('regUsername').value;
+        const password = document.getElementById('regPassword').value;
+        if (password.length < 6) {
+            document.getElementById('regError').innerHTML = 'Пароль должен быть не менее 6 символов';
+            return;
+        }
+        try {
+            await register(email, username, password);
+            document.getElementById('regError').innerHTML = '<span class="success">✅ Регистрация успешна! Теперь войдите.</span>';
+            setTimeout(() => {
+                document.getElementById('showLoginBtn').click();
+            }, 2000);
+        } catch(e) {
+            document.getElementById('regError').innerHTML = e.message;
+        }
+    });
+    
+    document.getElementById('sendBtn')?.addEventListener('click', async () => {
+        const message = document.getElementById('messageInput').value;
+        if (currentChatUser && message.trim()) {
+            await sendEncryptedMessage(currentChatUser, message);
+            document.getElementById('messageInput').value = '';
+            await refreshMessages();
+        }
+    });
+    
+    document.getElementById('messageInput')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') document.getElementById('sendBtn').click();
+    });
+    
+    document.getElementById('logoutBtn')?.addEventListener('click', async () => {
+        await logout();
+    });
+    
+    document.getElementById('searchUsersInput')?.addEventListener('input', () => {
+        refreshSearchResults();
+    });
+    
+    // ============================================================
+    // 🚀 ЗАПУСК
+    // ============================================================
+    
+    supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) {
+            currentUser = session.user;
+            myPrivateKey = localStorage.getItem(`privateKey_${currentUser.id}`);
+            loadUsers().then(() => showChatScreen());
+        } else {
+            showAuthScreen();
+        }
+    });
+    
+    supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN' && session) {
+            currentUser = session.user;
+            myPrivateKey = localStorage.getItem(`privateKey_${currentUser.id}`);
+            loadUsers().then(() => showChatScreen());
+        } else if (event === 'SIGNED_OUT') {
+            currentUser = null;
+            myPrivateKey = null;
+            showAuthScreen();
+        }
+    });
+</script>
+</body>
+  </html>
