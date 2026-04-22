@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecureMessenger</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: system-ui;
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #0f172a;
+            color: white;
+        }
+        input, button {
+            padding: 12px;
+            margin: 8px 0;
+            width: 100%;
+            border-radius: 8px;
+            border: none;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .error { color: #f87171; margin-top: 8px; }
+        .success { color: #4ade80; }
+        .flex-row { display: flex; gap: 10px; }
+        .flex-row button { width: auto; }
+    </style>
+</head>
+<body>
+    <h1>🔐 SecureMessenger</h1>
+    
+    <div class="flex-row">
+        <button id="showLoginBtn" style="background:#3b82f6">Вход</button>
+        <button id="showRegisterBtn" style="background:#334155">Регистрация</button>
+    </div>
+    
+    <div id="loginForm">
+        <input type="email" id="loginEmail" placeholder="Email">
+        <input type="password" id="loginPassword" placeholder="Пароль">
+        <button id="doLoginBtn">Войти</button>
+        <div id="loginError" class="error"></div>
+    </div>
+    
+    <div id="registerForm" style="display:none">
+        <input type="email" id="regEmail" placeholder="Email">
+        <input type="text" id="regUsername" placeholder="Никнейм">
+        <input type="password" id="regPassword" placeholder="Пароль (мин.6)">
+        <button id="doRegisterBtn">Зарегистрироваться</button>
+        <div id="regError" class="error"></div>
+    </div>
+
+    <div id="messageBox" style="display:none; margin-top:20px; padding:12px; background:#1e293b; border-radius:12px">
+        <div id="userInfo" style="margin-bottom:8px"></div>
+        <input type="text" id="messageInput" placeholder="Сообщение">
+        <button id="sendBtn">Отправить</button>
+        <div id="messagesArea" style="margin-top:12px; max-height:300px; overflow-y:auto"></div>
+        <button id="logoutBtn" style="background:#ef4444; margin-top:12px">Выйти</button>
+    </div>
+
+    <div id="debug" style="margin-top:20px; font-size:11px; color:#64748b; border-top:1px solid #334155; padding-top:12px"></div>
+
+<script>
+    // 🔥 ТВОИ КЛЮЧИ (проверь их в Supabase!)
+    const SUPABASE_URL = 'https://nufsoonoanfrtmrveida.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51ZnNvb25vYW5mcnRtcnZlaWRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NjA1NDAsImV4cCI6MjA5MjQzNjU0MH0.F-8VDXstONQSgmCyRAtoVdYBQTb1mIUZh7zIWYGj37A';
+    
+    const supabase = supabaseJs.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    let currentUser = null;
+    
+    function debug(msg, isErr = false) {
+        const div = document.getElementById('debug');
+        div.innerHTML += `<div style="color:${isErr ? '#f87171' : '#4ade80'}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+        console.log(msg);
+    }
+    
+    debug('✅ Скрипт загружен');
+    debug(`🔗 URL: ${SUPABASE_URL}`);
+    debug(`🔑 Ключ: ${SUPABASE_ANON_KEY.substring(0,20)}...`);
+    
+    // Регистрация
+    document.getElementById('doRegisterBtn')?.addEventListener('click', async () => {
+        debug('🔘 Нажата кнопка регистрации');
+        const email = document.getElementById('regEmail').value;
+        const username = document.getElementById('regUsername').value;
+        const password = document.getElementById('regPassword').value;
+        
+        if (password.length < 6) {
+            document.getElementById('regError').innerHTML = 'Пароль минимум 6 символов';
+            return;
+        }
+        
+        const { data, error } = await supabase.auth.signUp({
+            email, password,
+            options: { data: { username, display_name: username } }
+        });
+        
+        if (error) {
+            debug(`❌ Ошибка регистрации: ${error.message}`, true);
+            document.getElementById('regError').innerHTML = error.message;
+        } else {
+            debug(`✅ Регистрация успешна! Email: ${email}`);
+            document.getElementById('regError').innerHTML = '<span class="success">✅ Успех! Теперь войдите</span>';
+            setTimeout(() => document.getElementById('showLoginBtn').click(), 2000);
+        }
+    });
+    
+    // Вход
+    document.getElementById('doLoginBtn')?.addEventListener('click', async () => {
+        debug('🔘 Нажата кнопка входа');
+        const email = document.getElementById('loginEmail').value;
+        const password = document.getElementById('loginPassword').value;
+        
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        
+        if (error) {
+            debug(`❌ Ошибка входа: ${error.message}`, true);
+            document.getElementById('loginError').innerHTML = error.message;
+        } else {
+            debug(`✅ Вход выполнен! Привет, ${data.user.email}`);
+            currentUser = data.user;
+            document.getElementById('loginError').innerHTML = '<span class="success">✅ Вход выполнен!</span>';
+            document.getElementById('messageBox').style.display = 'block';
+            document.getElementById('userInfo').innerHTML = `👤 ${currentUser.email}`;
+        }
+    });
+    
+    // Переключение форм
+    document.getElementById('showLoginBtn')?.addEventListener('click', () => {
+        document.getElementById('loginForm').style.display = 'block';
+        document.getElementById('registerForm').style.display = 'none';
+    });
+    document.getElementById('showRegisterBtn')?.addEventListener('click', () => {
+        document.getElementById('loginForm').style.display = 'none';
+        document.getElementById('registerForm').style.display = 'block';
+    });
+    
+    // Выход
+    document.getElementById('logoutBtn')?.addEventListener('click', async () => {
+        await supabase.auth.signOut();
+        currentUser = null;
+        document.getElementById('messageBox').style.display = 'none';
+        document.getElementById('loginForm').style.display = 'block';
+        debug('👋 Выход выполнен');
+    });
+    
+    debug('🎉 Всё готово! Попробуй зарегистрироваться или войти');
+</script>
+</body>
+</html>
